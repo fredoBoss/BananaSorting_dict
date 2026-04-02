@@ -65,7 +65,7 @@ int pendingSortResult = 0;
 
 // Tune these per bin (ms) — increase if tray stops short of servo,
 // decrease if tray overshoots. Start at 300 and test bin by bin.
-int alignDelay[6] = {300, 300, 300, 300, 300, 300};
+int alignDelay[6] = {400, 100, 300, 100, 300, 300};
 //                  bin1  bin2  bin3  bin4  bin5  bin6
 
 // ─── Setup ──────────────────────────────────────────────────────────
