@@ -1,21 +1,275 @@
-// servo.ino
+// // servo.ino
 
-// ─── Double-click detection globals ──────────────────────────────────
-// Track how many times each bin's limit switch has been triggered
-int clickCount[6] = {0, 0, 0, 0, 0, 0};  // index 0 = bin 1, etc.  // FIX: start all at 0
-unsigned long lastClickTime[6] = {0, 0, 0, 0, 0, 0};
+// // ─── Double-click detection globals ──────────────────────────────────
+// // Track how many times each bin's limit switch has been triggered
+// int clickCount[6] = {0, 0, 0, 0, 0, 0};  // index 0 = bin 1, etc.  // FIX: start all at 0
+// unsigned long lastClickTime[6] = {0, 0, 0, 0, 0, 0};
 
-// ─── State machine for edge detection ───────────────────────────────
-// Tracks previous switch state to detect RELEASE edges (LOW→HIGH transitions)
-// FIX: was used for press detection (HIGH→LOW); now used for release detection (LOW→HIGH)
-int prevSwitchState[6] = {HIGH, HIGH, HIGH, HIGH, HIGH, HIGH};  // index 0 = bin 1, etc.
+// // ─── State machine for edge detection ───────────────────────────────
+// // Tracks previous switch state to detect RELEASE edges (LOW→HIGH transitions)
+// // FIX: was used for press detection (HIGH→LOW); now used for release detection (LOW→HIGH)
+// int prevSwitchState[6] = {HIGH, HIGH, HIGH, HIGH, HIGH, HIGH};  // index 0 = bin 1, etc.
 
-const unsigned long CLICK_TIMEOUT = 8000;    // reset if no next click within 8 sec
-const unsigned long DEBOUNCE_TIME = 1500;    // (reserved for future debounce use)
+// const unsigned long CLICK_TIMEOUT = 8000;    // reset if no next click within 8 sec
+// const unsigned long DEBOUNCE_TIME = 1500;    // (reserved for future debounce use)
 
-// ─── Required clicks per bin ────────────────────────────────────────
+// // ─── Required clicks per bin ────────────────────────────────────────
+// int requiredClicks[6] = {2, 3, 3, 4, 4, 5};
+// //                       bin1 bin2 bin3 bin4 bin5 bin6
+
+// void setupServo() {
+//   servoY1.attach(5);
+//   servoY2.attach(4);
+//   servoY3.attach(6);
+//   servoY4.attach(8);
+//   servoY5.attach(9);
+//   servoY6.attach(7);
+//   delay(15);
+//   stopallServo();
+//   delay(15);
+// }
+
+// void stopallServo() {
+//   servoY1.write(90);
+//   servoY2.write(90);
+//   servoY3.write(90);
+//   servoY4.write(90);
+//   servoY5.write(90);
+//   servoY6.write(90);
+// }
+
+// void initPosServo() {
+//   servoY1.write(servoValRot1);
+//   delay(rotateDelay);
+//   servoY1.write(90);
+//   servoY2.write(servoValRot1);
+//   delay(rotateDelay);
+//   servoY2.write(90);
+//   servoY3.write(90);
+//   servoY4.write(servoValRot1);
+//   delay(rotateDelay);
+//   servoY4.write(90);
+//   servoY5.write(servoValRot1);
+//   delay(rotateDelay);
+//   servoY5.write(90);
+//   servoY6.write(servoValRot1);
+//   delay(rotateDelay);
+//   servoY6.write(90);
+// }
+
+// // ─── fireServo ────────────────────────────────────────────────────────
+// // Fires the servo for a given bin number then resets it to neutral.
+// // Called by rotateAndSort() once the required release count is confirmed.
+// void fireServo(int bin) {
+//   switch (bin) {
+//     case 1:
+//       servoY1.write(servoValRot2);
+//       delay(rotateDelay);
+//       servoY1.write(servoValRot1);
+//       delay(rotateDelay);
+//       servoY1.write(95);
+//       break;
+//     case 2:
+//       servoY2.write(servoValRot2);
+//       delay(rotateDelay);
+//       servoY2.write(servoValRot1);
+//       delay(rotateDelay);
+//       servoY2.write(95);
+//       break;
+//     case 3:
+//       servoY3.write(servoValRot2);
+//       delay(rotateDelay);
+//       servoY3.write(servoValRot1);
+//       delay(rotateDelay);
+//       servoY3.write(95);
+//       break;
+//     case 4:
+//       servoY4.write(servoValRot2);
+//       delay(rotateDelay);
+//       servoY4.write(servoValRot1);
+//       delay(rotateDelay);
+//       servoY4.write(95);
+//       break;
+//     case 5:
+//       servoY5.write(servoValRot2);
+//       delay(rotateDelay);
+//       servoY5.write(servoValRot1);
+//       delay(rotateDelay);
+//       servoY5.write(95);
+//       break;
+//     case 6:
+//       servoY6.write(servoValRot2);
+//       delay(rotateDelay);
+//       servoY6.write(servoValRot1);
+//       delay(rotateDelay);
+//       servoY6.write(95);
+//       break;
+//   }
+//   stopallServo();
+//   delay(rotateDelay);
+// }
+
+// // ─── rotateAndSort (with release-based click detection) ───────────────
+// //
+// // Counts a "click" only when the limit switch is RELEASED (LOW → HIGH),
+// // not when it is pressed. This prevents a held/bouncing switch from
+// // counting multiple times on the same physical pass.
+// //
+// // Logic:
+// //   - Switch goes LOW  (press)   → just note it in prevSwitchState, do nothing yet
+// //   - Switch goes HIGH (release) → count as ONE click
+// //   - When clickCount reaches requiredClicks → stop motor, fire servo
+// //   - If CLICK_TIMEOUT elapses between releases → reset counter
+// void rotateAndSort(int targetBin) {
+//   curMotorState = 1;             // force state reset
+//   digitalWrite(motorCtrlPin, HIGH);  // ensure motor is OFF before we start
+
+//   if (targetBin < 1 || targetBin > 6) {
+//     Serial.println("Error: invalid bin " + String(targetBin));
+//     Serial.println("MOTOR_STOP");
+//     return;
+//   }
+
+//   // Servo switch pins in order — index 0 = bin 1 … index 5 = bin 6
+//   const int switchPins[6] = {35, 37, 39, 41, 43, 45};
+
+//   // ── Use ONE unified index variable throughout ─────────────────────
+//   // FIX: original code mixed targetIndex and binIndex (both = targetBin-1),
+//   //      which was redundant and error-prone. Now only targetIndex is used.
+//   int targetIndex = targetBin - 1;  // 0-based index for all arrays
+
+//   Serial.println("trayPos:" + String(targetBin));
+//   Serial.println("Sorting to bin " + String(targetBin) +
+//                  " (requires " + String(requiredClicks[targetIndex]) + " releases)");
+
+//   // Reset click tracking for this sort run
+//   clickCount[targetIndex]    = 0;
+//   lastClickTime[targetIndex] = 0;
+
+//   // Also reset the edge-detection state so we don't carry over a stale LOW
+//   // from a previous run (prevents a phantom first count on start)
+//   prevSwitchState[targetIndex] = HIGH;
+
+//   // Start conveyor
+//   motorRotateFunc(0);  // 0 = LOW = motor ON (active low)
+
+//   boolean isRunning = true;
+//   unsigned long startTime = millis();
+//   const unsigned long timeout = 45000;  // 45 s safety timeout
+
+//   while (isRunning) {
+
+//     // ── Safety timeout ───────────────────────────────────────────────
+//     if (millis() - startTime > timeout) {
+//       motorRotateFunc(1);               // motor OFF
+//       clickCount[targetIndex] = 0;      // reset for next sort
+//       prevSwitchState[targetIndex] = HIGH;
+//       Serial.println("TIMEOUT: sort aborted for bin " + String(targetBin));
+//       Serial.println("MOTOR_STOP");
+//       return;
+//     }
+
+//     int targetSwitchPin = switchPins[targetIndex];
+//     int currentState    = digitalRead(targetSwitchPin);
+//     unsigned long now   = millis();
+
+//     // ── STATE MACHINE: detect RELEASE edge (LOW → HIGH) ─────────────
+//     // FIX: original detected PRESS (HIGH→LOW). We now detect RELEASE
+//     //      (LOW→HIGH) so the count only increments after the switch
+//     //      has fully returned to its open/released state.
+//         if (prevSwitchState[targetIndex] == LOW && currentState == HIGH) {
+//       // Switch just released — check debounce before counting
+
+//       // ── DEBOUNCE GUARD ────────────────────────────────────────────
+//       // If this release happened too soon after the last valid one,
+//       // it is switch bounce from the SAME tray pass — ignore it.
+//       // Real trays passing the switch are always several seconds apart,
+//       // so DEBOUNCE_TIME (500ms) is a safe minimum gap between valid releases.
+//       bool tooSoon = (lastClickTime[targetIndex] > 0) &&
+//                      ((now - lastClickTime[targetIndex]) < DEBOUNCE_TIME);
+
+//       if (tooSoon) {
+//         // Bounce — log it and skip counting
+//         Serial.println("Bin " + String(targetBin) +
+//                        " BOUNCE ignored (" +
+//                        String(now - lastClickTime[targetIndex]) +
+//                        "ms since last release)");
+//       } else {
+//         // ── Valid release ─────────────────────────────────────────
+
+//         // Check for timeout between clicks (tray may have passed the bin)
+//         if (clickCount[targetIndex] > 0 &&
+//             (now - lastClickTime[targetIndex]) > CLICK_TIMEOUT) {
+//           Serial.println("Bin " + String(targetBin) +
+//                          " click timeout — resetting counter");
+//           clickCount[targetIndex] = 0;
+//         }
+
+//         // Increment and timestamp
+//         clickCount[targetIndex]++;
+//         lastClickTime[targetIndex] = now;
+
+//         Serial.println("Bin " + String(targetBin) +
+//                        " RELEASE " + String(clickCount[targetIndex]) +
+//                        "/" + String(requiredClicks[targetIndex]));
+
+//         if (clickCount[targetIndex] < requiredClicks[targetIndex]) {
+//           // Not enough releases yet — keep waiting
+//           Serial.println("  → waiting for more...");
+//         } else {
+//           // ── Required release count reached ──────────────────────
+//           Serial.println("  → CONFIRMED! Firing servo for bin " + String(targetBin));
+
+//           // alignDelay lets tray coast slightly so it sits perfectly under servo
+//           delay(alignDelay[targetBin - 1]);
+//           motorRotateFunc(1);  // motor OFF
+
+//           fireServo(targetBin);
+
+//           // Clean up state
+//           clickCount[targetIndex]      = 0;
+//           prevSwitchState[targetIndex] = HIGH;
+
+//           Serial.println("Rotate done");
+//           Serial.println("MOTOR_STOP");
+//           isRunning = false;
+//         }
+//       }
+//     }
+
+//     // ── Always update previous state ─────────────────────────────────
+//     // This must stay OUTSIDE the if-block so both press and release
+//     // transitions are tracked correctly on every loop iteration.
+//     prevSwitchState[targetIndex] = currentState;
+//   }
+// }
+
+// // ─── testServo (unchanged) ────────────────────────────────────────────
+// void testServo() {
+//   delay(rotateDelay);
+//   for (pos = 0; pos <= degF; pos += 1) {
+//     servoY1.write(pos);
+//     delay(15);
+//   }
+//   delay(rotateDelay);
+//   for (pos = degR; pos >= 0; pos -= 1) {
+//     servoY1.write(pos);
+//     delay(15);
+//   }
+// }
+
+// servo_fixed.ino
+// KEY CHANGE: rotateAndSort() now sends "SORT_DONE" (not "MOTOR_STOP")
+// Python's waitForSortDone() listens for "SORT_DONE" only — no confusion with CAM_STOP.
+
+int clickCount[6]        = {0, 0, 0, 0, 0, 0};
+unsigned long lastClickTime[6]  = {0, 0, 0, 0, 0, 0};
+int prevSwitchState[6]   = {HIGH, HIGH, HIGH, HIGH, HIGH, HIGH};
+
+const unsigned long CLICK_TIMEOUT = 8000;
+const unsigned long DEBOUNCE_TIME = 1500;
+
 int requiredClicks[6] = {2, 3, 3, 4, 4, 5};
-//                       bin1 bin2 bin3 bin4 bin5 bin6
 
 void setupServo() {
   servoY1.attach(5);
@@ -38,134 +292,75 @@ void stopallServo() {
   servoY6.write(90);
 }
 
-void initPosServo() {
-  servoY1.write(servoValRot1);
-  delay(rotateDelay);
-  servoY1.write(90);
-  servoY2.write(servoValRot1);
-  delay(rotateDelay);
-  servoY2.write(90);
-  servoY3.write(90);
-  servoY4.write(servoValRot1);
-  delay(rotateDelay);
-  servoY4.write(90);
-  servoY5.write(servoValRot1);
-  delay(rotateDelay);
-  servoY5.write(90);
-  servoY6.write(servoValRot1);
-  delay(rotateDelay);
-  servoY6.write(90);
-}
-
-// ─── fireServo ────────────────────────────────────────────────────────
-// Fires the servo for a given bin number then resets it to neutral.
-// Called by rotateAndSort() once the required release count is confirmed.
 void fireServo(int bin) {
   switch (bin) {
     case 1:
-      servoY1.write(servoValRot2);
-      delay(rotateDelay);
-      servoY1.write(servoValRot1);
-      delay(rotateDelay);
-      servoY1.write(95);
-      break;
+      servoY1.write(servoValRot2); delay(rotateDelay);
+      servoY1.write(servoValRot1); delay(rotateDelay);
+      servoY1.write(95); break;
     case 2:
-      servoY2.write(servoValRot2);
-      delay(rotateDelay);
-      servoY2.write(servoValRot1);
-      delay(rotateDelay);
-      servoY2.write(95);
-      break;
+      servoY2.write(servoValRot2); delay(rotateDelay);
+      servoY2.write(servoValRot1); delay(rotateDelay);
+      servoY2.write(95); break;
     case 3:
-      servoY3.write(servoValRot2);
-      delay(rotateDelay);
-      servoY3.write(servoValRot1);
-      delay(rotateDelay);
-      servoY3.write(95);
-      break;
+      servoY3.write(servoValRot2); delay(rotateDelay);
+      servoY3.write(servoValRot1); delay(rotateDelay);
+      servoY3.write(95); break;
     case 4:
-      servoY4.write(servoValRot2);
-      delay(rotateDelay);
-      servoY4.write(servoValRot1);
-      delay(rotateDelay);
-      servoY4.write(95);
-      break;
+      servoY4.write(servoValRot2); delay(rotateDelay);
+      servoY4.write(servoValRot1); delay(rotateDelay);
+      servoY4.write(95); break;
     case 5:
-      servoY5.write(servoValRot2);
-      delay(rotateDelay);
-      servoY5.write(servoValRot1);
-      delay(rotateDelay);
-      servoY5.write(95);
-      break;
+      servoY5.write(servoValRot2); delay(rotateDelay);
+      servoY5.write(servoValRot1); delay(rotateDelay);
+      servoY5.write(95); break;
     case 6:
-      servoY6.write(servoValRot2);
-      delay(rotateDelay);
-      servoY6.write(servoValRot1);
-      delay(rotateDelay);
-      servoY6.write(95);
-      break;
+      servoY6.write(servoValRot2); delay(rotateDelay);
+      servoY6.write(servoValRot1); delay(rotateDelay);
+      servoY6.write(95); break;
   }
   stopallServo();
   delay(rotateDelay);
 }
 
-// ─── rotateAndSort (with release-based click detection) ───────────────
-//
-// Counts a "click" only when the limit switch is RELEASED (LOW → HIGH),
-// not when it is pressed. This prevents a held/bouncing switch from
-// counting multiple times on the same physical pass.
-//
-// Logic:
-//   - Switch goes LOW  (press)   → just note it in prevSwitchState, do nothing yet
-//   - Switch goes HIGH (release) → count as ONE click
-//   - When clickCount reaches requiredClicks → stop motor, fire servo
-//   - If CLICK_TIMEOUT elapses between releases → reset counter
+// int alignDelay[6] = {400, 100, 300, 100, 300, 300};
+
+// ─── FIXED: sends "SORT_DONE" not "MOTOR_STOP" ───────────────────────────
 void rotateAndSort(int targetBin) {
-  curMotorState = 1;             // force state reset
-  digitalWrite(motorCtrlPin, HIGH);  // ensure motor is OFF before we start
+  curMotorState = 1;
+  digitalWrite(motorCtrlPin, HIGH);
 
   if (targetBin < 1 || targetBin > 6) {
     Serial.println("Error: invalid bin " + String(targetBin));
-    Serial.println("MOTOR_STOP");
+    Serial.println("SORT_DONE");   // ← was MOTOR_STOP
     return;
   }
 
-  // Servo switch pins in order — index 0 = bin 1 … index 5 = bin 6
   const int switchPins[6] = {35, 37, 39, 41, 43, 45};
-
-  // ── Use ONE unified index variable throughout ─────────────────────
-  // FIX: original code mixed targetIndex and binIndex (both = targetBin-1),
-  //      which was redundant and error-prone. Now only targetIndex is used.
-  int targetIndex = targetBin - 1;  // 0-based index for all arrays
+  int targetIndex = targetBin - 1;
 
   Serial.println("trayPos:" + String(targetBin));
   Serial.println("Sorting to bin " + String(targetBin) +
                  " (requires " + String(requiredClicks[targetIndex]) + " releases)");
 
-  // Reset click tracking for this sort run
-  clickCount[targetIndex]    = 0;
-  lastClickTime[targetIndex] = 0;
-
-  // Also reset the edge-detection state so we don't carry over a stale LOW
-  // from a previous run (prevents a phantom first count on start)
+  clickCount[targetIndex]      = 0;
+  lastClickTime[targetIndex]   = 0;
   prevSwitchState[targetIndex] = HIGH;
 
-  // Start conveyor
-  motorRotateFunc(0);  // 0 = LOW = motor ON (active low)
+  motorRotateFunc(0);  // motor ON
 
   boolean isRunning = true;
   unsigned long startTime = millis();
-  const unsigned long timeout = 45000;  // 45 s safety timeout
+  const unsigned long timeout = 45000;
 
   while (isRunning) {
 
-    // ── Safety timeout ───────────────────────────────────────────────
     if (millis() - startTime > timeout) {
-      motorRotateFunc(1);               // motor OFF
-      clickCount[targetIndex] = 0;      // reset for next sort
+      motorRotateFunc(1);
+      clickCount[targetIndex]      = 0;
       prevSwitchState[targetIndex] = HIGH;
       Serial.println("TIMEOUT: sort aborted for bin " + String(targetBin));
-      Serial.println("MOTOR_STOP");
+      Serial.println("SORT_DONE");   // ← was MOTOR_STOP — unblocks Python even on timeout
       return;
     }
 
@@ -173,78 +368,49 @@ void rotateAndSort(int targetBin) {
     int currentState    = digitalRead(targetSwitchPin);
     unsigned long now   = millis();
 
-    // ── STATE MACHINE: detect RELEASE edge (LOW → HIGH) ─────────────
-    // FIX: original detected PRESS (HIGH→LOW). We now detect RELEASE
-    //      (LOW→HIGH) so the count only increments after the switch
-    //      has fully returned to its open/released state.
-        if (prevSwitchState[targetIndex] == LOW && currentState == HIGH) {
-      // Switch just released — check debounce before counting
-
-      // ── DEBOUNCE GUARD ────────────────────────────────────────────
-      // If this release happened too soon after the last valid one,
-      // it is switch bounce from the SAME tray pass — ignore it.
-      // Real trays passing the switch are always several seconds apart,
-      // so DEBOUNCE_TIME (500ms) is a safe minimum gap between valid releases.
+    if (prevSwitchState[targetIndex] == LOW && currentState == HIGH) {
       bool tooSoon = (lastClickTime[targetIndex] > 0) &&
                      ((now - lastClickTime[targetIndex]) < DEBOUNCE_TIME);
 
       if (tooSoon) {
-        // Bounce — log it and skip counting
-        Serial.println("Bin " + String(targetBin) +
-                       " BOUNCE ignored (" +
-                       String(now - lastClickTime[targetIndex]) +
-                       "ms since last release)");
+        Serial.println("Bin " + String(targetBin) + " BOUNCE ignored (" +
+                       String(now - lastClickTime[targetIndex]) + "ms)");
       } else {
-        // ── Valid release ─────────────────────────────────────────
-
-        // Check for timeout between clicks (tray may have passed the bin)
         if (clickCount[targetIndex] > 0 &&
             (now - lastClickTime[targetIndex]) > CLICK_TIMEOUT) {
-          Serial.println("Bin " + String(targetBin) +
-                         " click timeout — resetting counter");
+          Serial.println("Bin " + String(targetBin) + " click timeout — resetting");
           clickCount[targetIndex] = 0;
         }
 
-        // Increment and timestamp
         clickCount[targetIndex]++;
         lastClickTime[targetIndex] = now;
 
-        Serial.println("Bin " + String(targetBin) +
-                       " RELEASE " + String(clickCount[targetIndex]) +
-                       "/" + String(requiredClicks[targetIndex]));
+        Serial.println("Bin " + String(targetBin) + " RELEASE " +
+                       String(clickCount[targetIndex]) + "/" +
+                       String(requiredClicks[targetIndex]));
 
-        if (clickCount[targetIndex] < requiredClicks[targetIndex]) {
-          // Not enough releases yet — keep waiting
-          Serial.println("  → waiting for more...");
-        } else {
-          // ── Required release count reached ──────────────────────
+        if (clickCount[targetIndex] >= requiredClicks[targetIndex]) {
           Serial.println("  → CONFIRMED! Firing servo for bin " + String(targetBin));
 
-          // alignDelay lets tray coast slightly so it sits perfectly under servo
           delay(alignDelay[targetBin - 1]);
           motorRotateFunc(1);  // motor OFF
 
           fireServo(targetBin);
 
-          // Clean up state
           clickCount[targetIndex]      = 0;
           prevSwitchState[targetIndex] = HIGH;
 
           Serial.println("Rotate done");
-          Serial.println("MOTOR_STOP");
+          Serial.println("SORT_DONE");   // ← KEY FIX: was "MOTOR_STOP"
           isRunning = false;
         }
       }
     }
 
-    // ── Always update previous state ─────────────────────────────────
-    // This must stay OUTSIDE the if-block so both press and release
-    // transitions are tracked correctly on every loop iteration.
     prevSwitchState[targetIndex] = currentState;
   }
 }
 
-// ─── testServo (unchanged) ────────────────────────────────────────────
 void testServo() {
   delay(rotateDelay);
   for (pos = 0; pos <= degF; pos += 1) {
